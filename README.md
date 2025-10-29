@@ -26,9 +26,3 @@ This repository currently contains the Python script (`preprocessing_pipeline.py
 5.  Splitting the aggregated data into training and testing sets.
 6.  Applying StandardScaler to the EEG channels.
 
-## 🚀 How to Run the Preprocessing Pipeline
-
-### 1. Clone the Repository
-```bash
-git clone [https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git](https://github.com/YOUR_USERNAME/YOUR_REPO_NAME.git)
-cd eeg-preprocessing-pipeline # Or your chosen repo name
