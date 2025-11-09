@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-gray-900">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>EEG Signal Simulator</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ["Inter", "sans-serif"],
+            },
+          },
+        },
+      };
+    </script>
+    <style>
+      /* Custom scrollbar for the log */
+      #log-output::-webkit-scrollbar {
+        width: 8px;
+      }
+      #log-output::-webkit-scrollbar-track {
+        background: #1f2937; /* gray-800 */
+      }
+      #log-output::-webkit-scrollbar-thumb {
+        background: #4b5563; /* gray-600 */
+        border-radius: 4px;
+      }
+      #log-output::-webkit-scrollbar-thumb:hover {
+        background: #6b7280; /* gray-500 */
+      }
+    </style>
+  </head>
+  <body
+    class="h-full flex items-center justify-center p-4 md:p-8 bg-gray-900 text-gray-200 font-sans"
+  >
+    <div
+      class="w-full max-w-4xl bg-gray-800 shadow-2xl rounded-2xl p-6 md:p-10 border border-gray-700"
+    >
+      <header class="mb-6">
+        <h1 class="text-3xl font-bold text-center text-white">
+          EEG Signal Simulator
+        </h1>
+        <p class="text-center text-gray-400 mt-2">
+          Continuously send artificial EEG data to your model's API endpoint.
+        </p>
+      </header>
+
+      <!-- Step 1: API URL -->
+      <div class="mb-6">
+        <label
+          for="api-url"
+          class="block text-sm font-medium text-gray-300 mb-2"
+          >1. Your API Endpoint URL</label
+        >
+        <input
+          type="text"
+          id="api-url"
+          class="w-full px-4 py-3 bg-gray-900 border border-gray-700 rounded-lg text-gray-200 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          placeholder="Paste your ngrok URL here (e.g., https://....ngrok.io)"
+        />
+      </div>
+
+      <!-- Step 2: Sample Data -->
+      <div class="mb-6">
+        <label
+          for="sample-data-input"
+          class="block text-sm font-medium text-gray-300 mb-2"
+          >2. Your `sampleTrials` Data</label
+        >
+        <p class="text-xs text-gray-500 mb-2">
+          Run your first Python script and paste its
+          <strong class="text-gray-400">entire output</strong> (including
+          <code class="bg-gray-900 px-1 rounded">const sampleTrials = {</code>
+          and the final <code class="bg-gray-900 px-1 rounded">};</code>) into
+          the box below.
+        </p>
+        <textarea
+          id="sample-data-input"
+          class="w-full h-48 p-4 bg-gray-900 border border-gray-700 rounded-lg font-mono text-sm text-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+          spellcheck="false"
+        >
+const sampleTrials = {
+    // PASTE YOUR DATA HERE
+    // It should look like this:
+    // "left hand": [[...], ...],
+    // "right hand": [[...], ...],
+    // "feet": [[...], ...],
+    // "tongue": [[...], ...]
+};
+            </textarea
+        >
+      </div>
+
+      <!-- Step 3: Controls -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <button
+          id="start-btn"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+        >
+          Start Simulation
+        </button>
+        <button
+          id="stop-btn"
+          class="w-full bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-6 rounded-lg transition duration-200 shadow-lg focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-offset-2 focus:ring-offset-gray-800"
+          disabled
+        >
+          Stop Simulation
+        </button>
+      </div>
+
+      <!-- Step 4: Live Status & Log -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Status -->
+        <div class="bg-gray-900 p-6 rounded-lg border border-gray-700">
+          <h2 class="text-lg font-semibold text-white mb-4">Live Status</h2>
+          <div id="status-box" class="text-gray-400">
+            <p>Simulation stopped.</p>
+          </div>
+          <div id="prediction-box" class="mt-4 text-center">
+            <!-- Prediction will be injected here -->
+          </div>
+        </div>
+
+        <!-- Log -->
+        <div
+          class="bg-gray-900 rounded-lg border border-gray-700 flex flex-col"
+          style="max-height: 300px"
+        >
+          <h2 class="text-lg font-semibold text-white p-6 pb-4">
+            Simulation Log
+          </h2>
+          <div
+            id="log-output"
+            class="w-full h-full p-6 pt-0 font-mono text-sm text-gray-400 overflow-y-auto whitespace-pre-wrap break-words"
+          >
+            Welcome! Press "Start" to begin.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // --- DOM Elements ---
+      const apiUrlInput = document.getElementById("api-url");
+      const dataInput = document.getElementById("sample-data-input");
+      const startBtn = document.getElementById("start-btn");
+      const stopBtn = document.getElementById("stop-btn");
+      const statusBox = document.getElementById("status-box");
+      const predictionBox = document.getElementById("prediction-box");
+      const logOutput = document.getElementById("log-output");
+
+      // --- State ---
+      let simulationInterval = null;
+      let sampleTrials = {};
+      const CLASSES = ["left hand", "right hand", "feet", "tongue"];
+      const SIGNAL_INTERVAL = 2000; // 2 seconds
+      const NOISE_LEVEL = 0.5;
+
+      // --- Functions ---
+
+      function logMessage(message, type = "info") {
+        const now = new Date().toLocaleTimeString();
+        let colorClass = "text-gray-400";
+        if (type === "error") {
+          colorClass = "text-red-400";
+        } else if (type === "success") {
+          colorClass = "text-green-400";
+        } else if (type === "sending") {
+          colorClass = "text-blue-400";
+        }
+        logOutput.innerHTML =
+          `<span class="${colorClass}">[${now}] ${message}</span>\n` +
+          logOutput.innerHTML;
+      }
+
+      function updateStatus(message, isLoading = false) {
+        statusBox.innerHTML = isLoading
+          ? `<div class="flex items-center space-x-2">
+                       <svg class="animate-spin h-5 w-5 text-blue-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                           <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                           <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                       </svg>
+                       <span>${message}</span>
+                   </div>`
+          : `<p>${message}</p>`;
+      }
+
+      function updatePrediction(prediction, confidence) {
+        const confidencePct = (confidence * 100).toFixed(1);
+        let emoji = "🧠";
+        if (prediction.includes("hand")) emoji = "🖐️";
+        if (prediction.includes("feet")) emoji = "🦶";
+        if (prediction.includes("tongue")) emoji = "👅";
+
+        predictionBox.innerHTML = `
+                <div class="text-6xl mb-2">${emoji}</div>
+                <div class="text-2xl font-bold text-white capitalize">${prediction}</div>
+                <div class="text-lg text-blue-300">${confidencePct}% Confidence</div>
+            `;
+      }
+
+      function parseSampleData() {
+        try {
+          const dataString = dataInput.value.trim();
+
+          // --- FIX ---
+          // Instead of using `new Function()`, we'll manually find the
+          // JSON object within the pasted text.
+
+          const firstBrace = dataString.indexOf("{");
+          const lastBrace = dataString.lastIndexOf("}");
+
+          if (firstBrace === -1 || lastBrace === -1 || lastBrace < firstBrace) {
+            throw new Error(
+              "Could not find the start '{' and end '}' of the object. Please paste the full text."
+            );
+          }
+
+          // Extract just the object part
+          const jsonString = dataString.substring(firstBrace, lastBrace + 1);
+
+          // Parse it as JSON and assign it to our global variable
+          sampleTrials = JSON.parse(jsonString);
+
+          // --- END FIX ---
+
+          if (
+            typeof sampleTrials === "undefined" ||
+            Object.keys(sampleTrials).length === 0
+          ) {
+            throw new Error(
+              "Parsed `sampleTrials` object is empty or invalid."
+            );
+          }
+
+          // Check if all classes are present
+          for (const key of CLASSES) {
+            if (!sampleTrials[key]) {
+              throw new Error(`Missing data for class: "${key}"`);
+            }
+          }
+          logMessage("Successfully parsed sample trial data.", "success");
+          return true;
+        } catch (e) {
+          logMessage(`Error parsing sample data: ${e.message}`, "error");
+          logMessage(
+            "Please make sure you pasted the *entire* script output, including 'const sampleTrials = {' and '};'",
+            "error"
+          );
+          return false;
+        }
+      }
+
+      function generateArtificialTrial(baseTrial) {
+        // This is a deep copy
+        const noisyTrial = JSON.parse(JSON.stringify(baseTrial));
+
+        // Add noise
+        for (let i = 0; i < noisyTrial.length; i++) {
+          for (let j = 0; j < noisyTrial[i].length; j++) {
+            // Add Gaussian-like noise
+            const noise = (Math.random() - 0.5) * NOISE_LEVEL;
+            noisyTrial[i][j] += noise;
+          }
+        }
+        return noisyTrial;
+      }
+
+      async function sendSignal() {
+        const apiUrl = apiUrlInput.value.trim();
+        if (!apiUrl) {
+          logMessage("API URL is empty.", "error");
+          stopSimulation();
+          return;
+        }
+
+        const predictUrl = apiUrl.endsWith("/")
+          ? `${apiUrl}predict`
+          : `${apiUrl}/predict`;
+
+        // 1. Pick random class and generate noisy trial
+        const randomClass = CLASSES[Math.floor(Math.random() * CLASSES.length)];
+        const baseTrial = sampleTrials[randomClass];
+        const noisyTrial = generateArtificialTrial(baseTrial);
+
+        const payload = { eeg_data: noisyTrial };
+
+        logMessage(`Sending artificial '${randomClass}' trial...`, "sending");
+        updateStatus(`Sending artificial '${randomClass}' trial...`, true);
+
+        try {
+          // 2. Send POST request
+          const response = await fetch(predictUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+
+          if (!response.ok) {
+            let errorMsg = `HTTP error! Status: ${response.status}`;
+            try {
+              const errData = await response.json();
+              errorMsg += ` - ${errData.error || "Unknown error"}`;
+              if (response.status === 400) {
+                logMessage(
+                  "Got 400 Error. This likely means the data shape is wrong.",
+                  "error"
+                );
+                logMessage(
+                  "Did you paste the correct data? Backend expects (1000, 25).",
+                  "error"
+                );
+              }
+            } catch (e) {
+              /* ignore if response is not json */
+            }
+            throw new Error(errorMsg);
+          }
+
+          // 3. Process successful response
+          const result = await response.json();
+
+          logMessage(
+            `Received prediction: '${result.prediction}' (Confidence: ${(
+              result.confidence * 100
+            ).toFixed(1)}%)`,
+            "success"
+          );
+          updateStatus("Prediction received successfully.");
+          updatePrediction(result.prediction, result.confidence);
+        } catch (error) {
+          logMessage(`Fetch Error: ${error.message}`, "error");
+          logMessage(
+            "Check console (F12) for more details. Is the API URL correct and server running?",
+            "error"
+          );
+          updateStatus(`Error: ${error.message}`);
+          stopSimulation();
+        }
+      }
+
+      function startSimulation() {
+        logOutput.innerHTML = ""; // Clear log
+        logMessage("Starting simulation...");
+
+        const apiUrl = apiUrlInput.value.trim();
+        if (!apiUrl) {
+          logMessage("Please enter your API Endpoint URL.", "error");
+          return;
+        }
+
+        if (!parseSampleData()) {
+          return;
+        }
+
+        // Disable/Enable buttons
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+        apiUrlInput.disabled = true;
+        dataInput.disabled = true;
+
+        // Send first signal immediately, then set interval
+        sendSignal();
+        simulationInterval = setInterval(sendSignal, SIGNAL_INTERVAL);
+      }
+
+      function stopSimulation() {
+        if (simulationInterval) {
+          clearInterval(simulationInterval);
+          simulationInterval = null;
+        }
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        apiUrlInput.disabled = false;
+        dataInput.disabled = false;
+
+        logMessage("Simulation stopped.");
+        updateStatus("Simulation stopped.");
+      }
+
+      // --- Event Listeners ---
+      startBtn.addEventListener("click", startSimulation);
+      stopBtn.addEventListener("click", stopSimulation);
+    </script>
+  </body>
+</html>
